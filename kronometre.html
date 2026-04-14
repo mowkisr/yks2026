@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Kronometre">
+<title>Kronometre</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: #000;
+    color: #fff;
+    font-family: -apple-system, "SF Pro Display", "SF Pro Text", Helvetica, sans-serif;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    max-width: 768px;
+    margin: 0 auto;
+    padding: 0 32px;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .header {
+    position: fixed;
+    top: max(env(safe-area-inset-top, 20px), 20px);
+    left: 32px;
+    font-size: 34px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+
+  .time-display {
+    font-size: clamp(72px, 18vw, 100px);
+    font-weight: 200;
+    letter-spacing: -4px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 6px;
+  }
+
+  .cs-display {
+    font-size: clamp(40px, 10vw, 54px);
+    font-weight: 200;
+    letter-spacing: -2px;
+    color: #8e8e93;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 52px;
+  }
+
+  .btn-row {
+    display: flex;
+    width: 100%;
+    justify-content: space-between;
+    align-items: center;
+    max-width: 320px;
+  }
+
+  .btn-circle {
+    width: 88px;
+    height: 88px;
+    border-radius: 50%;
+    border: none;
+    outline: none;
+    cursor: pointer;
+    font-size: 18px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.15s;
+    -webkit-appearance: none;
+  }
+  .btn-circle:active { opacity: 0.6; }
+
+  /* Sol: Sıfırla */
+  #btnReset {
+    background: #3a3a3c;
+    color: #fff;
+    transition: opacity 0.2s;
+  }
+  #btnReset.disabled {
+    opacity: 0.3;
+    pointer-events: none;
+  }
+
+  /* Sağ: Başlat/Durdur/Devam */
+  #btnMain.start { background: #1e3a28; color: #30d158; }
+  #btnMain.stop  { background: #3a1e1e; color: #ff453a; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="header">Kronometre</div>
+
+  <div class="time-display" id="timeDisplay">00:00:00</div>
+  <div class="cs-display"   id="csDisplay">.00</div>
+
+  <div class="btn-row">
+    <button id="btnReset" class="btn-circle disabled" onclick="resetAction()">Sıfırla</button>
+    <button id="btnMain"  class="btn-circle start"    onclick="mainAction()">Başlat</button>
+  </div>
+</div>
+
+<script>
+  let absoluteStart = null;
+  let pausedElapsed = 0;
+  let running       = false;
+  let rafId         = null;
+
+  const KEY    = 'sw_v6';
+  const timeEl = document.getElementById('timeDisplay');
+  const csEl   = document.getElementById('csDisplay');
+  const btn    = document.getElementById('btnMain');
+  const btnRes = document.getElementById('btnReset');
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+
+  function fmtHMS(ms) {
+    return pad(Math.floor(ms/3600000)) + ':' +
+           pad(Math.floor(ms/60000)%60) + ':' +
+           pad(Math.floor(ms/1000)%60);
+  }
+  function fmtCs(ms) { return '.' + pad(Math.floor(ms/10)%100); }
+
+  function getElapsed() {
+    return (running && absoluteStart) ? Date.now() - absoluteStart : pausedElapsed;
+  }
+
+  function tick() {
+    const e = getElapsed();
+    timeEl.textContent = fmtHMS(e);
+    csEl.textContent   = fmtCs(e);
+    rafId = requestAnimationFrame(tick);
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify({
+        absoluteStart,
+        pausedElapsed: running ? null : pausedElapsed,
+        running
+      }));
+    } catch(e) {}
+  }
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      absoluteStart = s.absoluteStart || null;
+      if (s.running && absoluteStart) {
+        running = true;
+        rafId = requestAnimationFrame(tick);
+        setUIRunning();
+      } else if (absoluteStart) {
+        pausedElapsed = s.pausedElapsed || 0;
+        timeEl.textContent = fmtHMS(pausedElapsed);
+        csEl.textContent   = fmtCs(pausedElapsed);
+        setUIPaused();
+      }
+    } catch(e) {}
+  }
+
+  function setUIRunning() {
+    btn.textContent = 'Durdur'; btn.className = 'btn-circle stop';
+    btnRes.classList.add('disabled');      // çalışırken sıfırla pasif
+  }
+  function setUIPaused() {
+    btn.textContent = 'Devam';  btn.className = 'btn-circle start';
+    btnRes.classList.remove('disabled');   // durdurulunca sıfırla aktif
+  }
+  function setUIIdle() {
+    btn.textContent = 'Başlat'; btn.className = 'btn-circle start';
+    btnRes.classList.add('disabled');      // henüz başlamadı
+  }
+
+  function mainAction() {
+    if (!running) {
+      absoluteStart = Date.now() - pausedElapsed;
+      running = true;
+      rafId = requestAnimationFrame(tick);
+      setUIRunning();
+    } else {
+      cancelAnimationFrame(rafId);
+      pausedElapsed = Date.now() - absoluteStart;
+      timeEl.textContent = fmtHMS(pausedElapsed);
+      csEl.textContent   = fmtCs(pausedElapsed);
+      running = false;
+      setUIPaused();
+    }
+    save();
+  }
+
+  function resetAction() {
+    cancelAnimationFrame(rafId);
+    absoluteStart = null; pausedElapsed = 0; running = false;
+    timeEl.textContent = '00:00:00';
+    csEl.textContent   = '.00';
+    setUIIdle();
+    save();
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') save();
+  });
+  window.addEventListener('pagehide', save);
+  window.addEventListener('beforeunload', save);
+
+  load();
+  if (!absoluteStart) setUIIdle();
+</script>
+</body>
+</html>
